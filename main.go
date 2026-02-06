@@ -11,13 +11,33 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Styles
 var (
-	dirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66")).Bold(true)
-	fileStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00e756"))
-	sizeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
-	dotStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#004d26"))
-	symStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa"))
-	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff3334"))
+	// Header / separators
+	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
+	sepStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
+
+	// Type column
+	dirTag  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66")).Bold(true).Render("DIR")
+	fileTag = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633")).Render("FILE")
+	symTag  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa")).Render("LINK")
+
+	// Name
+	dirNameStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66")).Bold(true)
+	fileNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00cc55"))
+	dotNameStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
+	symNameStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa"))
+
+	// Size
+	sizeNumStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00e756"))
+	sizeUnitStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
+	sizeDashStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
+
+	// Error
+	errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff3334"))
+
+	// Count
+	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
 )
 
 type entry struct {
@@ -26,6 +46,7 @@ type entry struct {
 	isSym bool
 	size  int64
 	dot   bool
+	ext   string
 }
 
 func main() {
@@ -54,7 +75,7 @@ func main() {
 
 	entries, err := os.ReadDir(target)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, errStyle.Render("error: "+err.Error()))
+		fmt.Fprintln(os.Stderr, errStyle.Render("  error: "+err.Error()))
 		os.Exit(1)
 	}
 
@@ -89,12 +110,18 @@ func main() {
 			continue
 		}
 
+		ext := ""
+		if !isDir {
+			ext = strings.TrimPrefix(filepath.Ext(name), ".")
+		}
+
 		items = append(items, entry{
 			name:  name,
 			isDir: isDir,
 			isSym: isSym,
 			size:  info.Size(),
 			dot:   isDot,
+			ext:   ext,
 		})
 	}
 
@@ -107,58 +134,124 @@ func main() {
 	})
 
 	if len(items) == 0 {
+		fmt.Println(countStyle.Render("  empty"))
 		return
 	}
 
-	// Calculate column widths
-	maxName := 0
+	// Column widths
+	maxName := 4 // minimum "NAME"
+	maxExt := 3  // minimum "EXT"
 	for _, it := range items {
-		display := it.name
-		if it.isDir {
-			display += "/"
+		if len(it.name) > maxName {
+			maxName = len(it.name)
 		}
-		if len(display) > maxName {
-			maxName = len(display)
+		if len(it.ext) > maxExt {
+			maxExt = len(it.ext)
 		}
 	}
 
+	// Header
+	hType := headerStyle.Render(pad("TYPE", 4))
+	hName := headerStyle.Render(pad("NAME", maxName))
+	hExt := headerStyle.Render(pad("EXT", maxExt))
+	hSize := headerStyle.Render(padLeft("SIZE", 7))
+	sep := sepStyle.Render("  ")
+
+	fmt.Println()
+	fmt.Println("  " + hType + sep + hName + sep + hExt + sep + hSize)
+	fmt.Println("  " + sepStyle.Render(strings.Repeat("─", 4)) + sep +
+		sepStyle.Render(strings.Repeat("─", maxName)) + sep +
+		sepStyle.Render(strings.Repeat("─", maxExt)) + sep +
+		sepStyle.Render(strings.Repeat("─", 7)))
+
+	dirCount := 0
+	fileCount := 0
+
 	for _, it := range items {
-		name := it.name
-		sizeStr := ""
-
+		// Type tag
+		tag := fileTag
 		if it.isDir {
-			name += "/"
-		}
-
-		if !it.isDir {
-			sizeStr = humanSize(it.size)
+			tag = dirTag
+			dirCount++
 		} else {
-			sizeStr = "   -"
+			fileCount++
 		}
+		if it.isSym {
+			tag = symTag
+		}
+		tCol := pad(tag, 4)
 
-		padded := name + strings.Repeat(" ", maxName-len(name)+2)
-
-		var line string
+		// Name
+		nameStr := pad(it.name, maxName)
 		switch {
 		case it.isSym:
-			line = symStyle.Render(padded) + sizeStyle.Render(sizeStr)
+			nameStr = symNameStyle.Render(nameStr)
 		case it.isDir && it.dot:
-			line = dotStyle.Render(padded) + sizeStyle.Render(sizeStr)
+			nameStr = dotNameStyle.Render(nameStr)
 		case it.isDir:
-			line = dirStyle.Render(padded) + sizeStyle.Render(sizeStr)
+			nameStr = dirNameStyle.Render(nameStr)
 		case it.dot:
-			line = dotStyle.Render(padded) + sizeStyle.Render(sizeStr)
+			nameStr = dotNameStyle.Render(nameStr)
 		default:
-			line = fileStyle.Render(padded) + sizeStyle.Render(sizeStr)
+			nameStr = fileNameStyle.Render(nameStr)
 		}
 
-		fmt.Println(line)
+		// Ext
+		extStr := pad(it.ext, maxExt)
+		if it.ext == "" {
+			extStr = dotNameStyle.Render(pad("—", maxExt))
+		} else {
+			extStr = sizeUnitStyle.Render(extStr)
+		}
+
+		// Size
+		var sizeStr string
+		if it.isDir {
+			sizeStr = sizeDashStyle.Render(padLeft("—", 7))
+		} else {
+			num, unit := humanSizeParts(it.size)
+			sizeStr = sizeNumStyle.Render(padLeft(num, 5)) + sizeUnitStyle.Render(padLeft(unit, 2))
+		}
+
+		fmt.Println("  " + tCol + sep + nameStr + sep + extStr + sep + sizeStr)
 	}
+
+	// Footer
+	fmt.Println()
+	parts := []string{}
+	if dirCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d dir", dirCount))
+		if dirCount > 1 {
+			parts[len(parts)-1] += "s"
+		}
+	}
+	if fileCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d file", fileCount))
+		if fileCount > 1 {
+			parts[len(parts)-1] += "s"
+		}
+	}
+	fmt.Println("  " + countStyle.Render(strings.Join(parts, ", ")))
+	fmt.Println()
 }
 
-func humanSize(b int64) string {
+func pad(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+func padLeft(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-len(s)) + s
+}
+
+func humanSizeParts(b int64) (string, string) {
 	if b == 0 {
-		return "   0B"
+		return "0", "B"
 	}
 	units := []string{"B", "K", "M", "G", "T"}
 	i := int(math.Log(float64(b)) / math.Log(1024))
@@ -167,10 +260,10 @@ func humanSize(b int64) string {
 	}
 	val := float64(b) / math.Pow(1024, float64(i))
 	if i == 0 {
-		return fmt.Sprintf("%4dB", b)
+		return fmt.Sprintf("%d", b), "B"
 	}
 	if val >= 10 {
-		return fmt.Sprintf("%4d%s", int(val), units[i])
+		return fmt.Sprintf("%d", int(val)), units[i]
 	}
-	return fmt.Sprintf("%4.1f%s", val, units[i])
+	return fmt.Sprintf("%.1f", val), units[i]
 }
